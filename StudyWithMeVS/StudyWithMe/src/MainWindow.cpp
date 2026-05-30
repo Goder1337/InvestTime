@@ -8,6 +8,7 @@
 #include <QCloseEvent>
 #include <QDate>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -189,6 +190,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
 QFrame *MainWindow::createCard(const QString &title, const QString &caption)
 {
+    // 通用玻璃卡片：番茄鐘、待辦、環境、狀態、簡介頁都使用這個外框。
     auto *frame = new QFrame;
     frame->setObjectName("card");
     frame->setAttribute(Qt::WA_StyledBackground, true);
@@ -202,6 +204,7 @@ QFrame *MainWindow::createCard(const QString &title, const QString &caption)
     captionLabel->setObjectName("muted");
     captionLabel->setWordWrap(true);
 
+    // 卡片上方固定放標題與說明文字，後面的功能控件會由各 buildXXXCard 加入。
     layout->addWidget(titleLabel);
     layout->addWidget(captionLabel);
 
@@ -212,6 +215,7 @@ QFrame *MainWindow::createCard(const QString &title, const QString &caption)
 
 QPushButton *MainWindow::createButton(const QString &text, const QString &objectName)
 {
+    // 全域按鈕工廠：objectName 會對應 applyTheme() 裡的 QSS 樣式。
     auto *button = new QPushButton(text);
     button->setCursor(Qt::PointingHandCursor);
     button->setObjectName(objectName);
@@ -222,6 +226,7 @@ QPushButton *MainWindow::createButton(const QString &text, const QString &object
 
 QWidget *MainWindow::createTabPage()
 {
+    // 每個標籤頁的基礎容器，內部再塞一張功能卡片。
     auto *page = new QWidget;
     page->setObjectName("tabPage");
     auto *layout = new QVBoxLayout(page);
@@ -232,6 +237,7 @@ QWidget *MainWindow::createTabPage()
 
 QWidget *MainWindow::buildTitleBar()
 {
+    // 自繪標題列：因為主視窗是 FramelessWindowHint，所以拖動與按鈕都由我們處理。
     auto *bar = new QWidget;
     bar->setObjectName("titleBar");
     bar->setFixedHeight(30);
@@ -244,10 +250,12 @@ QWidget *MainWindow::buildTitleBar()
 
     auto *title = new QLabel("StudyWithMe");
     title->setObjectName("titleBarText");
+    // 左側標題文字；右側 stretch 後才放置頂/最小化/關閉。
     layout->addWidget(title);
     layout->addStretch();
 
     auto makeTitleButton = [this](const QString &text, const QString &objectName) {
+        // 標題列小按鈕固定尺寸，避免影響拖動區域。
         auto *button = new QPushButton(text);
         button->setObjectName(objectName);
         button->setCursor(Qt::PointingHandCursor);
@@ -259,6 +267,7 @@ QWidget *MainWindow::buildTitleBar()
     m_pinButton = makeTitleButton("置", "titleButton");
     m_pinButton->setCheckable(true);
     m_pinButton->setToolTip("窗口置顶");
+    // 置頂、最小化、關閉三個視窗控制按鈕。
     m_minimizeButton = makeTitleButton("—", "titleButton");
     m_minimizeButton->setToolTip("最小化");
     m_closeButton = makeTitleButton("×", "titleCloseButton");
@@ -277,6 +286,7 @@ QWidget *MainWindow::buildTitleBar()
 
 void MainWindow::buildUi()
 {
+    // 主視窗最外層：上方自繪標題列，下方是所有內容。
     auto *shell = new QVBoxLayout(this);
     shell->setContentsMargins(1, 1, 1, 1);
     shell->setSpacing(0);
@@ -284,6 +294,7 @@ void MainWindow::buildUi()
 
     m_contentWidget = new QWidget;
     m_contentWidget->setObjectName("contentWidget");
+    // contentLayout 控制完整主視窗內容區的外距。
     auto *contentLayout = new QVBoxLayout(m_contentWidget);
     contentLayout->setContentsMargins(21, 12, 21, 21);
     contentLayout->setSpacing(14);
@@ -291,6 +302,7 @@ void MainWindow::buildUi()
 
     m_headerWidget = new QWidget;
     m_headerWidget->setObjectName("headerWidget");
+    // 頂部狀態列：左邊是標題文案，右邊是待辦小窗與日夜切換。
     auto *header = new QHBoxLayout(m_headerWidget);
     header->setContentsMargins(0, 0, 0, 0);
     header->setSpacing(12);
@@ -298,10 +310,11 @@ void MainWindow::buildUi()
     headlineBox->setSpacing(4);
     auto *eyebrow = new QLabel("FOCUS DASHBOARD");
     eyebrow->setObjectName("eyebrow");
-    auto *headline = new QLabel("安静、高效、可控的学习空间");
+    auto *headline = new QLabel("Together We Learn, Together We Rise");
     headline->setObjectName("headline");
     auto *subtitle = new QLabel(QDate::currentDate().toString("yyyy.MM.dd  dddd"));
     subtitle->setObjectName("muted");
+    // 頂部三行文字：英文小標、主標題、日期。
     headlineBox->addWidget(eyebrow);
     headlineBox->addWidget(headline);
     headlineBox->addWidget(subtitle);
@@ -309,6 +322,7 @@ void MainWindow::buildUi()
     header->addStretch();
     m_compactButton = createButton("待办小窗", "ghostButton");
     m_compactButton->setCheckable(true);
+    // 待辦小窗按鈕：切換完整視窗與只顯示待辦的小視窗。
     header->addWidget(m_compactButton);
     buildThemeSwitch(header);
     contentLayout->addWidget(m_headerWidget);
@@ -342,6 +356,7 @@ void MainWindow::buildUi()
     const QStringList tabNames = {"番茄钟", "待办事项", "环境氛围", "状态概览", "个人简介"};
     auto *tabGroup = new QButtonGroup(this);
     tabGroup->setExclusive(true);
+    // 五個功能標籤按鈕平均分配寬度，氣泡由 moveTabBubble() 跟隨目前選中項。
     for (int i = 0; i < tabNames.size(); ++i) {
         auto *button = createButton(tabNames.at(i), "tabButton");
         button->setCheckable(true);
@@ -355,22 +370,27 @@ void MainWindow::buildUi()
     }
 
     QWidget *timerPage = createTabPage();
+    // 標籤頁 0：番茄鐘。
     buildTimerCard(static_cast<QVBoxLayout *>(timerPage->layout()));
     m_featureStack->addWidget(timerPage);
 
     QWidget *todoPage = createTabPage();
+    // 標籤頁 1：待辦事項。
     buildTodoCard(static_cast<QVBoxLayout *>(todoPage->layout()));
     m_featureStack->addWidget(todoPage);
 
     QWidget *ambiencePage = createTabPage();
+    // 標籤頁 2：環境氛圍。
     buildAmbienceCard(static_cast<QVBoxLayout *>(ambiencePage->layout()));
     m_featureStack->addWidget(ambiencePage);
 
     QWidget *overviewPage = createTabPage();
+    // 標籤頁 3：狀態概覽。
     buildOverviewCard(static_cast<QVBoxLayout *>(overviewPage->layout()));
     m_featureStack->addWidget(overviewPage);
 
     QWidget *profilePage = createTabPage();
+    // 標籤頁 4：個人簡介。
     buildProfileCard(static_cast<QVBoxLayout *>(profilePage->layout()));
     m_featureStack->addWidget(profilePage);
 
@@ -386,6 +406,7 @@ void MainWindow::buildUi()
 
 void MainWindow::buildThemeSwitch(QHBoxLayout *header)
 {
+    // 白天/夜晚切換外殼；高度與旁邊按鈕保持一致。
     auto *switchFrame = new QFrame;
     switchFrame->setObjectName("themeSwitch");
     switchFrame->setAttribute(Qt::WA_StyledBackground, true);
@@ -403,6 +424,7 @@ void MainWindow::buildThemeSwitch(QHBoxLayout *header)
 
     m_dayButton = createButton("白天", "themeButton");
     m_nightButton = createButton("夜晚", "themeButton");
+    // 兩個主題按鈕由同一個氣泡背景滑動表示選中狀態。
     m_dayButton->setFixedHeight(34);
     m_nightButton->setFixedHeight(34);
     m_dayButton->setCheckable(true);
@@ -427,11 +449,13 @@ void MainWindow::buildThemeSwitch(QHBoxLayout *header)
 
 void MainWindow::buildTimerCard(QVBoxLayout *pageLayout)
 {
+    // 番茄鐘頁：圓環、專注/休息時長、開始/重置按鈕。
     auto *frame = createCard("番茄钟", "设置专注与休息时长，进度环会以平滑动画反馈当前节奏。");
     pageLayout->addWidget(frame, 1);
     auto *layout = static_cast<QVBoxLayout *>(frame->layout());
 
     m_ring = new FocusRing;
+    // 中央倒數圓環，實際繪製在 FocusRing::paintEvent()。
     layout->addWidget(m_ring, 1, Qt::AlignCenter);
 
     auto *settings = new QHBoxLayout;
@@ -439,6 +463,7 @@ void MainWindow::buildTimerCard(QVBoxLayout *pageLayout)
 
     auto *focusBox = new QFrame;
     focusBox->setObjectName("miniCard");
+    // 專注時長卡片：QSpinBox 控制番茄鐘主時長。
     auto *focusLayout = new QVBoxLayout(focusBox);
     focusLayout->setContentsMargins(14, 10, 14, 12);
     focusLayout->setSpacing(6);
@@ -455,6 +480,7 @@ void MainWindow::buildTimerCard(QVBoxLayout *pageLayout)
 
     auto *breakBox = new QFrame;
     breakBox->setObjectName("miniCard");
+    // 休息時長卡片：目前保留設定 UI，方便後續擴充休息流程。
     auto *breakLayout = new QVBoxLayout(breakBox);
     breakLayout->setContentsMargins(14, 10, 14, 12);
     breakLayout->setSpacing(6);
@@ -477,6 +503,7 @@ void MainWindow::buildTimerCard(QVBoxLayout *pageLayout)
     actions->setSpacing(12);
     m_startButton = createButton("开始", "primaryButton");
     auto *reset = createButton("重置");
+    // 底部操作按鈕：開始/暫停共用 m_startButton，reset 回到設定時長。
     actions->addWidget(m_startButton, 1);
     actions->addWidget(reset);
     layout->addLayout(actions);
@@ -488,6 +515,7 @@ void MainWindow::buildTimerCard(QVBoxLayout *pageLayout)
 
 void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
 {
+    // 待辦頁：完整視窗與待辦小窗共用同一張卡片。
     auto *frame = createCard("待办事项", "把今天要完成的学习任务放进清单，完成后可直接勾选。");
     m_todoCard = frame;
     pageLayout->addWidget(frame, 1);
@@ -497,6 +525,7 @@ void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
 
     m_todoRestoreRowWidget = new QWidget;
     m_todoRestoreRowWidget->setFixedHeight(34);
+    // 小窗模式專用的還原列，完整模式下隱藏。
     auto *restoreLayout = new QHBoxLayout(m_todoRestoreRowWidget);
     restoreLayout->setContentsMargins(0, 0, 0, 4);
     restoreLayout->setSpacing(0);
@@ -517,12 +546,14 @@ void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
     m_todoInput = new QLineEdit;
     m_todoInput->setPlaceholderText("添加一个任务，例如：复习线性代数第三章");
     auto *add = createButton("添加", "primaryButton");
+    // 新增待辦輸入列：按 Enter 或「添加」都會建立待辦。
     inputRow->addWidget(m_todoInput, 1);
     inputRow->addWidget(add);
     layout->addWidget(m_todoInputRowWidget);
 
     m_todoList = new QListWidget;
     m_todoList->setObjectName("todoList");
+    // 待辦列表：每個 item 內嵌一個 QCheckBox，便於保存勾選狀態。
     m_todoList->setMinimumHeight(360);
     m_todoList->setSpacing(8);
     m_todoList->setUniformItemSizes(true);
@@ -537,6 +568,7 @@ void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
     });
 
     m_cleanTodoButton = createButton("清除已完成");
+    // 清除已完成只移除勾選項，不影響未完成任務。
     layout->addWidget(m_cleanTodoButton);
 
     addTodo("完成一组英语听力训练");
@@ -550,6 +582,7 @@ void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
 
 void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
 {
+    // 環境氛圍頁：模式按鈕、音量、沉浸強度與播放控制。
     auto *frame = createCard("环境氛围", "选择适合当前学习阶段的背景氛围，并调整音量与沉浸强度。");
     pageLayout->addWidget(frame, 1);
     auto *layout = static_cast<QVBoxLayout *>(frame->layout());
@@ -561,6 +594,7 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
 
     const QStringList ambienceItems = {"雨夜书桌", "咖啡馆", "白噪音", "森林晨光"};
     for (int i = 0; i < ambienceItems.size(); ++i) {
+        // 四個環境音模式按鈕，id 對應 ambienceUrl() 的音源列表。
         auto *button = createButton(ambienceItems.at(i), "ambientButton");
         button->setCheckable(true);
         button->setMinimumHeight(58);
@@ -577,6 +611,7 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
     auto *volumeLabel = new QLabel("氛围音量");
     volumeLabel->setObjectName("muted");
     auto *volume = new QSlider(Qt::Horizontal);
+    // 音量滑桿直接控制 QAudioOutput 音量。
     volume->setRange(0, 100);
     volume->setValue(64);
     connect(volume, &QSlider::valueChanged, this, [this](int value) {
@@ -588,6 +623,7 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
     auto *depthLabel = new QLabel("沉浸强度");
     depthLabel->setObjectName("muted");
     auto *depth = new QSlider(Qt::Horizontal);
+    // 沉浸強度目前是展示控件，保留給後續視覺/音效強度擴充。
     depth->setRange(0, 100);
     depth->setValue(72);
 
@@ -596,7 +632,10 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
     layout->addSpacing(18);
     layout->addWidget(depthLabel);
     layout->addWidget(depth);
-    m_playSoundButton = createButton("播放环境音", "primaryButton");
+    m_playSoundButton = createButton("播放环境音", "soundButton");
+    m_playSoundButton->setProperty("playing", false);
+    m_playSoundButton->setMinimumHeight(46);
+    // 播放/暫停環境音，音源優先使用本地 assets，否則 fallback 到網路音源。
     layout->addSpacing(18);
     layout->addWidget(m_playSoundButton);
     connect(m_playSoundButton, &QPushButton::clicked, this, &MainWindow::toggleAmbiencePlayback);
@@ -605,6 +644,7 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
 
 void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
 {
+    // 狀態概覽頁：學習目標、清空進度與四個統計卡片。
     auto *frame = createCard("状态概览", "保持轻量反馈，专注于下一步行动。");
     pageLayout->addWidget(frame, 1);
     auto *layout = static_cast<QVBoxLayout *>(frame->layout());
@@ -614,6 +654,7 @@ void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
     goalRow->addStretch();
     auto *clearProgressButton = createButton("清空学习进度", "dangerButton");
     clearProgressButton->setMinimumWidth(136);
+    // 危險操作按鈕：會二次確認後清空 studyDays。
     goalRow->addWidget(clearProgressButton);
     m_goalButton = createButton("学习目标", "ghostButton");
     m_goalButton->setMinimumWidth(120);
@@ -630,6 +671,7 @@ void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
     layout->addLayout(grid, 1);
 
     auto addOverviewMetric = [this, grid](const QString &name, const QString &value, int progress, int row, int column, QProgressBar **progressBar) {
+        // 統計小卡：標題、時間數值、進度條。
         auto *box = new QFrame;
         box->setObjectName("miniCard");
         box->setAttribute(Qt::WA_StyledBackground, true);
@@ -661,6 +703,7 @@ void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
     };
 
     m_todayStatsLabel = addOverviewMetric("今日学习", "0 分钟", 0, 0, 0, &m_todayProgressBar);
+    // 四個統計卡片分成 2x2，進度條在 updateStatsLabels() 裡更新。
     m_weekStatsLabel = addOverviewMetric("本周学习", "0 分钟", 0, 0, 1, &m_weekProgressBar);
     m_monthStatsLabel = addOverviewMetric("本月学习", "0 分钟", 0, 1, 0, &m_monthProgressBar);
     m_totalStatsLabel = addOverviewMetric("累计学习", "0 分钟", 0, 1, 1, &m_totalProgressBar);
@@ -690,7 +733,8 @@ void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
 
 void MainWindow::buildProfileCard(QVBoxLayout *pageLayout)
 {
-    auto *frame = createCard("个人简介", "一个安静、轻量的专注陪伴页。");
+    // 個人簡介頁：左側介紹工具，右側顯示給使用者的話。
+    auto *frame = createCard("About Me", "Nothing");
     pageLayout->addWidget(frame, 1);
     auto *layout = static_cast<QVBoxLayout *>(frame->layout());
 
@@ -705,28 +749,41 @@ void MainWindow::buildProfileCard(QVBoxLayout *pageLayout)
     auto *introLayout = new QVBoxLayout(introBox);
     introLayout->setContentsMargins(22, 20, 22, 20);
     introLayout->setSpacing(12);
-    auto *introTitle = new QLabel("StudyWithMe");
+    auto *introTitle = new QLabel("Find Me");
     introTitle->setObjectName("metricValue");
-    auto *introText = new QLabel(
-        "我是一款用 C++ / Qt 制作的学习陪伴工具，负责把番茄钟、待办事项、环境氛围和学习统计放在同一个安静的空间里。");
-    introText->setWordWrap(true);
-    introText->setObjectName("profileText");
     introLayout->addWidget(introTitle);
-    introLayout->addWidget(introText);
+
+    // 修改這裡為你的個人 Telegram 與 GitHub 首頁連結。
+    const QUrl telegramUrl("https://t.me/Kino1337_Main");
+    const QUrl githubUrl("https://github.com/Goder1337");
+    auto *telegramButton = createButton("Telegram", "linkButton");
+    auto *githubButton = createButton("GitHub", "linkButton");
+    telegramButton->setMinimumHeight(38);
+    githubButton->setMinimumHeight(38);
+    introLayout->addWidget(telegramButton);
+    introLayout->addWidget(githubButton);
+    connect(telegramButton, &QPushButton::clicked, this, [telegramUrl]() {
+        QDesktopServices::openUrl(telegramUrl);
+    });
+    connect(githubButton, &QPushButton::clicked, this, [githubUrl]() {
+        QDesktopServices::openUrl(githubUrl);
+    });
+
     introLayout->addStretch();
     row->addWidget(introBox, 1);
 
     auto *noteBox = new QFrame;
     noteBox->setObjectName("miniCard");
+    // 右側寄語卡片，可在 noteText 文字處修改內容。
     noteBox->setAttribute(Qt::WA_StyledBackground, true);
     m_shadowWidgets.append(noteBox);
     auto *noteLayout = new QVBoxLayout(noteBox);
     noteLayout->setContentsMargins(22, 20, 22, 20);
     noteLayout->setSpacing(12);
-    auto *noteTitle = new QLabel("想对你说");
+    auto *noteTitle = new QLabel("To Users:");
     noteTitle->setObjectName("metricValue");
     auto *noteText = new QLabel(
-        "不用每次都做到完美。只要今天愿意坐下来，认真完成一个小目标，时间就已经在悄悄站到你这边。");
+        "该软件目前仅支持本地使用，作者只为统计学习时长因此暂未考虑线上自习室等联机功能。\r\n如果在使用过程中遇到问题或需要新功能，请给我留言，非常感谢你的建议");
     noteText->setWordWrap(true);
     noteText->setObjectName("profileText");
     noteLayout->addWidget(noteTitle);
@@ -739,6 +796,7 @@ void MainWindow::buildProfileCard(QVBoxLayout *pageLayout)
 
 QLabel *MainWindow::addMetric(QHBoxLayout *row, const QString &name, const QString &value, int progress)
 {
+    // 舊版橫向統計卡片工具函式，保留給日後若要改回橫排使用。
     auto *box = new QFrame;
     box->setObjectName("miniCard");
     box->setAttribute(Qt::WA_StyledBackground, true);
@@ -765,6 +823,7 @@ QLabel *MainWindow::addMetric(QHBoxLayout *row, const QString &name, const QStri
 
 void MainWindow::showGoalDialog()
 {
+    // 學習目標彈窗：使用主視窗 QSS，並用自繪標題列保持白天/夜晚一致。
     QDialog dialog(this);
     dialog.setObjectName("root");
     dialog.setAttribute(Qt::WA_StyledBackground, true);
@@ -782,6 +841,7 @@ void MainWindow::showGoalDialog()
     titleBar->setFixedHeight(38);
     titleBar->setCursor(Qt::SizeAllCursor);
     titleBar->installEventFilter(new DialogDragFilter(&dialog, &dialog));
+    // titleBar 安裝 DialogDragFilter 後即可按住拖動彈窗。
     auto *titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(16, 4, 8, 4);
     titleLayout->setSpacing(8);
@@ -802,18 +862,21 @@ void MainWindow::showGoalDialog()
     form->setSpacing(12);
 
     auto *dailySpin = new QSpinBox;
+    // 每日目標，UI 以分鐘顯示，保存時轉成秒。
     dailySpin->setRange(1, 24 * 60);
     dailySpin->setSuffix(" 分钟");
     dailySpin->setValue(qMax(1, m_dailyGoalSeconds / 60));
     dailySpin->setAlignment(Qt::AlignCenter);
 
     auto *weeklySpin = new QSpinBox;
+    // 每週目標，UI 以分鐘顯示，保存時轉成秒。
     weeklySpin->setRange(1, 7 * 24 * 60);
     weeklySpin->setSuffix(" 分钟");
     weeklySpin->setValue(qMax(1, m_weeklyGoalSeconds / 60));
     weeklySpin->setAlignment(Qt::AlignCenter);
 
     auto *monthlySpin = new QSpinBox;
+    // 每月目標，UI 以小時顯示，保存時轉成秒。
     monthlySpin->setRange(1, 31 * 24);
     monthlySpin->setSuffix(" 小时");
     monthlySpin->setValue(qMax(1, m_monthlyGoalSeconds / 3600));
@@ -830,6 +893,7 @@ void MainWindow::showGoalDialog()
     layout->addLayout(form);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    // 保存/取消沿用主視窗的 primaryButton 與 ghostButton 樣式。
     buttons->button(QDialogButtonBox::Ok)->setText("保存");
     buttons->button(QDialogButtonBox::Cancel)->setText("取消");
     buttons->button(QDialogButtonBox::Ok)->setObjectName("primaryButton");
@@ -862,11 +926,13 @@ void MainWindow::addTodo(const QString &text, bool checked)
         return;
     }
 
+    // 每個待辦項目由 QListWidgetItem 承載，實際可點擊控件是 QCheckBox。
     auto *item = new QListWidgetItem;
     auto *checkBox = new QCheckBox(text.trimmed());
     checkBox->setObjectName("todoCheck");
     checkBox->setCursor(Qt::PointingHandCursor);
     if (m_todoCompact) {
+        // 小窗模式使用 compact 屬性觸發較緊湊的 QSS。
         checkBox->setProperty("compact", true);
         checkBox->setFixedWidth(190);
     }
@@ -888,6 +954,7 @@ void MainWindow::addTodoFromInput()
 
 void MainWindow::removeCompletedTodos()
 {
+    // 從尾端開始刪除，避免刪除過程中索引前移造成漏刪。
     for (int i = m_todoList->count() - 1; i >= 0; --i) {
         QListWidgetItem *item = m_todoList->item(i);
         auto *checkBox = qobject_cast<QCheckBox *>(m_todoList->itemWidget(item));
@@ -901,6 +968,7 @@ void MainWindow::removeCompletedTodos()
 
 void MainWindow::toggleTimer()
 {
+    // 開始/暫停/繼續共用同一顆按鈕，根據 timer 狀態切換文字。
     if (m_timer.isActive()) {
         m_timer.stop();
         if (m_ring) {
@@ -923,6 +991,7 @@ void MainWindow::toggleTimer()
 
 void MainWindow::resetTimer()
 {
+    // 重置為目前專注時長，並刷新圓環顯示。
     m_timer.stop();
     if (m_ring) {
         m_ring->setGlow(0.0);
@@ -940,6 +1009,7 @@ void MainWindow::resetTimer()
 
 void MainWindow::tick()
 {
+    // 每秒倒數，並把專注秒數累加到今日統計。
     if (m_remainingSeconds > 0) {
         --m_remainingSeconds;
         addStudySecond();
@@ -948,6 +1018,7 @@ void MainWindow::tick()
     updateRing();
 
     if (m_remainingSeconds <= 0) {
+        // 倒數完成：停止計時、保存統計、更新文字並發出 Windows 通知。
         m_timer.stop();
         if (m_ring) {
             m_ring->setGlow(0.0);
@@ -961,6 +1032,7 @@ void MainWindow::tick()
 
 void MainWindow::updateRing()
 {
+    // 讓 FocusRing 的文字與進度同步目前倒數狀態。
     if (!m_ring) {
         return;
     }
@@ -983,6 +1055,7 @@ void MainWindow::updateRing()
 
 void MainWindow::selectTab(int index)
 {
+    // 切換 QStackedWidget 頁面，同時播放標籤氣泡移動動畫。
     if (!m_featureStack || index < 0 || index >= m_featureStack->count()) {
         return;
     }
@@ -993,6 +1066,7 @@ void MainWindow::selectTab(int index)
 
 void MainWindow::moveTabBubble(int index, bool animated)
 {
+    // 標籤列的藍色氣泡，目標位置跟隨目前選中的 tabButton。
     if (!m_tabBubble || index < 0 || index >= m_tabButtons.size()) {
         return;
     }
@@ -1018,6 +1092,7 @@ void MainWindow::moveTabBubble(int index, bool animated)
 
 void MainWindow::moveThemeBubble(bool animated)
 {
+    // 白天/夜晚切換的氣泡，依 m_nightMode 移到對應按鈕下方。
     if (!m_themeBubble || !m_dayButton || !m_nightButton) {
         return;
     }
@@ -1042,6 +1117,7 @@ void MainWindow::moveThemeBubble(bool animated)
 
 void MainWindow::toggleAlwaysOnTop()
 {
+    // 標題列「置」按鈕：切換 Windows 置頂旗標並保存。
     m_alwaysOnTop = m_pinButton && m_pinButton->isChecked();
     setWindowFlag(Qt::WindowStaysOnTopHint, m_alwaysOnTop);
     show();
@@ -1055,6 +1131,7 @@ void MainWindow::toggleTodoCompact()
 
 void MainWindow::setTodoCompact(bool compact)
 {
+    // 待辦小窗模式：隱藏主介面，只留下標題列、還原按鈕與待辦列表。
     if (compact == m_todoCompact) {
         return;
     }
@@ -1065,6 +1142,7 @@ void MainWindow::setTodoCompact(bool compact)
     }
 
     if (compact) {
+        // 進入小窗前保存完整視窗位置，還原時用 m_normalGeometry 回去。
         m_normalGeometry = geometry();
         if (m_featureStack) {
             m_featureStack->setCurrentIndex(1);
@@ -1101,6 +1179,7 @@ void MainWindow::setTodoCompact(bool compact)
             m_restoreButton->show();
         }
         if (m_todoList) {
+            // 小窗模式下待辦更窄、更緊湊，最多顯示三條。
             m_todoList->setSpacing(4);
             m_todoList->setMinimumHeight(56);
             m_todoList->setMaximumHeight(QWIDGETSIZE_MAX);
@@ -1121,6 +1200,7 @@ void MainWindow::setTodoCompact(bool compact)
         setWindowTitle("StudyWithMe - 双击恢复");
         updateTodoCompactSize();
     } else {
+        // 退出小窗：恢復完整視窗所有標題、輸入列與清除按鈕。
         if (m_headerWidget) {
             m_headerWidget->show();
         }
@@ -1190,6 +1270,7 @@ void MainWindow::setTodoCompact(bool compact)
 
 void MainWindow::updateTodoCompactSize()
 {
+    // 小窗尺寸計算：依待辦數量自適應，超過三條固定為三條高度並用滾輪瀏覽。
     if (!m_todoCompact || !m_todoList) {
         return;
     }
@@ -1211,6 +1292,7 @@ void MainWindow::updateTodoCompactSize()
 
 void MainWindow::setupPersistence()
 {
+    // 建立 ini 檔所在資料夾，所有狀態都寫入 settingsPath()。
     const QFileInfo info(settingsPath());
     QDir().mkpath(info.absolutePath());
 }
@@ -1227,6 +1309,7 @@ QString MainWindow::settingsPath() const
 
 void MainWindow::loadState()
 {
+    // 啟動時讀取 UI、番茄鐘、學習目標、音訊與待辦狀態。
     QSettings settings(settingsPath(), QSettings::IniFormat);
 
     m_nightMode = settings.value("ui/nightMode", false).toBool();
@@ -1279,6 +1362,7 @@ void MainWindow::loadState()
 
 void MainWindow::saveState()
 {
+    // 關閉或切換重要狀態時保存設定，避免重啟後丟失。
     flushStudyStats();
     saveTodos();
 
@@ -1307,6 +1391,7 @@ void MainWindow::saveState()
 
 void MainWindow::loadTodos()
 {
+    // 從 ini 的 todos/items 陣列讀回待辦文字與勾選狀態。
     QSettings settings(settingsPath(), QSettings::IniFormat);
     if (!settings.value("todos/saved", false).toBool() || !m_todoList) {
         return;
@@ -1323,6 +1408,7 @@ void MainWindow::loadTodos()
 
 void MainWindow::saveTodos()
 {
+    // 將目前列表完整寫回 ini；每條待辦保存 text 與 checked。
     if (!m_todoList) {
         return;
     }
@@ -1346,6 +1432,7 @@ void MainWindow::saveTodos()
 
 void MainWindow::addStudySecond()
 {
+    // 番茄鐘運行時每秒累加今日學習時間，累計 10 秒後落盤一次。
     m_dailyStudySeconds[QDate::currentDate()] += 1;
     ++m_unsavedStudySeconds;
     updateStatsLabels();
@@ -1356,6 +1443,7 @@ void MainWindow::addStudySecond()
 
 void MainWindow::flushStudyStats()
 {
+    // 將每日學習秒數寫入 studyDays 群組。
     if (m_unsavedStudySeconds <= 0 && !m_dailyStudySeconds.isEmpty()) {
         return;
     }
@@ -1372,6 +1460,7 @@ void MainWindow::flushStudyStats()
 
 void MainWindow::updateStatsLabels()
 {
+    // 更新四個統計數值與進度條：今日、本週、本月、累計。
     const int today = studySecondsForDay(QDate::currentDate());
     const int week = studySecondsForCurrentWeek();
     const int month = studySecondsForCurrentMonth();
@@ -1394,6 +1483,7 @@ void MainWindow::updateStatsLabels()
     }
 
     auto progress = [](int seconds, int goalSeconds) {
+        // 將實際秒數轉成 0~100 的進度條百分比。
         if (goalSeconds <= 0) {
             return 0;
         }
@@ -1420,6 +1510,7 @@ int MainWindow::studySecondsForDay(const QDate &date) const
 
 int MainWindow::studySecondsForCurrentWeek() const
 {
+    // 以 Qt 的 dayOfWeek() 計算本週一到今天的總秒數。
     const QDate today = QDate::currentDate();
     const QDate weekStart = today.addDays(1 - today.dayOfWeek());
     int total = 0;
@@ -1433,6 +1524,7 @@ int MainWindow::studySecondsForCurrentWeek() const
 
 int MainWindow::studySecondsForCurrentMonth() const
 {
+    // 只累加當前年月的學習秒數。
     const QDate today = QDate::currentDate();
     int total = 0;
     for (auto it = m_dailyStudySeconds.cbegin(); it != m_dailyStudySeconds.cend(); ++it) {
@@ -1445,6 +1537,7 @@ int MainWindow::studySecondsForCurrentMonth() const
 
 QString MainWindow::formatDuration(int seconds) const
 {
+    // 統一格式化學習時長，超過一小時顯示「小時 + 分鐘」。
     const int hours = seconds / 3600;
     const int minutes = (seconds % 3600) / 60;
     if (hours > 0) {
@@ -1455,6 +1548,7 @@ QString MainWindow::formatDuration(int seconds) const
 
 void MainWindow::setupTrayIcon()
 {
+    // 系統托盤用於番茄鐘完成通知與雙擊還原視窗。
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         return;
     }
@@ -1475,6 +1569,7 @@ void MainWindow::setupTrayIcon()
 
 void MainWindow::showPomodoroFinishedMessage()
 {
+    // 番茄鐘結束時右下角 Windows 通知。
     if (m_trayIcon) {
         m_trayIcon->showMessage("番茄钟完成", "这一轮专注结束了，休息一下再继续。", QSystemTrayIcon::Information, 6000);
     }
@@ -1482,16 +1577,27 @@ void MainWindow::showPomodoroFinishedMessage()
 
 void MainWindow::setupAudio()
 {
+    // Qt Multimedia 音訊初始化：播放器、輸出與循環播放。
     m_audioOutput = new QAudioOutput(this);
     m_audioOutput->setVolume(0.64f);
     m_audioPlayer = new QMediaPlayer(this);
     m_audioPlayer->setAudioOutput(m_audioOutput);
     m_audioPlayer->setLoops(QMediaPlayer::Infinite);
+    connect(m_audioPlayer, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
+        // 播放狀態可能由按鈕、音源切換或播放器內部改變，統一從這裡刷新 UI。
+        updateAmbienceButton(state == QMediaPlayer::PlayingState);
+    });
+    connect(m_audioPlayer, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &) {
+        // 網路音源或解碼失敗時，立即把按鈕恢復成可播放狀態，避免 UI 卡在「暫停環境音」。
+        updateAmbienceButton(false);
+    });
     selectAmbience(0);
+    updateAmbienceButton(false);
 }
 
 void MainWindow::selectAmbience(int index)
 {
+    // 切換環境音，若原本正在播放則換源後繼續播放。
     m_ambienceIndex = qBound(0, index, 3);
     if (!m_audioPlayer) {
         return;
@@ -1501,28 +1607,46 @@ void MainWindow::selectAmbience(int index)
     m_audioPlayer->setSource(ambienceUrl(m_ambienceIndex));
     if (wasPlaying) {
         m_audioPlayer->play();
+    } else {
+        updateAmbienceButton(false);
     }
 }
 
 void MainWindow::toggleAmbiencePlayback()
 {
+    // 播放/暫停環境音按鈕；點擊判斷優先看目前 UI 狀態，避免播放器緩衝/停止時第二次點擊仍走播放分支。
     if (!m_audioPlayer || !m_playSoundButton) {
         return;
     }
-    if (m_audioPlayer->playbackState() == QMediaPlayer::PlayingState) {
+    const bool shownAsPlaying = m_playSoundButton->property("playing").toBool();
+    if (shownAsPlaying || m_audioPlayer->playbackState() == QMediaPlayer::PlayingState) {
         m_audioPlayer->pause();
-        m_playSoundButton->setText("播放环境音");
+        updateAmbienceButton(false);
     } else {
         if (m_audioPlayer->source().isEmpty()) {
             m_audioPlayer->setSource(ambienceUrl(m_ambienceIndex));
         }
         m_audioPlayer->play();
-        m_playSoundButton->setText("暂停环境音");
+        updateAmbienceButton(true);
     }
+}
+
+void MainWindow::updateAmbienceButton(bool playing)
+{
+    // 只由此函式更新環境音按鈕文字與動態屬性，避免再次點擊時文字、顏色不同步。
+    if (!m_playSoundButton) {
+        return;
+    }
+    m_playSoundButton->setText(playing ? "暂停环境音" : "播放环境音");
+    m_playSoundButton->setProperty("playing", playing);
+    m_playSoundButton->style()->unpolish(m_playSoundButton);
+    m_playSoundButton->style()->polish(m_playSoundButton);
+    m_playSoundButton->update();
 }
 
 QUrl MainWindow::ambienceUrl(int index) const
 {
+    // 優先使用部署目錄 assets/audio 下的本地音檔。
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList localFiles = {
         appDir + "/assets/audio/rain.ogg",
@@ -1535,6 +1659,7 @@ QUrl MainWindow::ambienceUrl(int index) const
     }
 
     const QStringList remoteUrls = {
+        // 本地檔不存在時使用網路 fallback，方便專案先能播放。
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/Rain%20and%20thunder.ogg",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/Restaurant%20ambience%2C%20early%20morning%2C%20A.wav",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/White%20noise.ogg",
@@ -1545,6 +1670,7 @@ QUrl MainWindow::ambienceUrl(int index) const
 
 void MainWindow::applyTheme(bool nightMode)
 {
+    // 全域主題入口：集中控制所有控件顏色與關鍵渲染樣式。
     m_nightMode = nightMode;
     if (m_dayButton) {
         m_dayButton->setChecked(!nightMode);
@@ -1556,6 +1682,7 @@ void MainWindow::applyTheme(bool nightMode)
         m_ring->setNightMode(nightMode);
     }
 
+    // 主背景、卡片、邊框與按鈕底色；白天模式刻意壓低亮度以凸顯控件邊界。
     const QString rootBg = nightMode
         ? "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0f1015, stop:0.48 #191a22, stop:1 #101116)"
         : "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #f2f5f9, stop:0.46 #e5edf7, stop:1 #f0edf7)";
@@ -1571,11 +1698,14 @@ void MainWindow::applyTheme(bool nightMode)
     const QString activeBg = nightMode ? "#323238" : "#dceeff";
     const QString glassButtonBg = nightMode ? "rgba(255, 255, 255, 28)" : "rgba(236, 242, 250, 205)";
     const QString glassButtonHover = nightMode ? "rgba(255, 255, 255, 45)" : "rgba(224, 237, 249, 236)";
+    // 標籤列與白天/夜晚切換共用的滑動氣泡。
     const QString bubbleBg = nightMode
         ? "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(118, 214, 255, 190), stop:0.55 rgba(89, 196, 246, 174), stop:1 rgba(146, 212, 255, 160))"
         : "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(144, 224, 255, 196), stop:0.55 rgba(94, 203, 255, 180), stop:1 rgba(185, 236, 255, 168))";
 
+    // 主要 QSS：若要改 UI 色彩、圓角、邊框、間距，大多從這段開始調。
     setStyleSheet(QString(R"(
+        /* 根節點：主視窗與學習目標彈窗共用。 */
         QWidget#root {
             background: %1;
             color: %2;
@@ -1584,6 +1714,7 @@ void MainWindow::applyTheme(bool nightMode)
             border: 1px solid %4;
             border-radius: 10px;
         }
+        /* 自繪標題列：主視窗與學習目標彈窗共用。 */
         QWidget#titleBar, QWidget#dialogTitleBar {
             background: %5;
             border-top-left-radius: 10px;
@@ -1617,6 +1748,7 @@ void MainWindow::applyTheme(bool nightMode)
             background: transparent;
             border: none;
         }
+        /* 五個功能標籤與滑動氣泡。 */
         QFrame#customTabBar {
             background: %5;
             border: 1px solid %4;
@@ -1641,6 +1773,7 @@ void MainWindow::applyTheme(bool nightMode)
             background: transparent;
             border: none;
         }
+        /* 主要玻璃卡片與小卡片外觀。 */
         QFrame#card {
             background: %3;
             border: 1px solid %4;
@@ -1654,6 +1787,7 @@ void MainWindow::applyTheme(bool nightMode)
         QDialogButtonBox {
             background: transparent;
         }
+        /* 文字層級：頂部主標、卡片標題、統計數字、弱化文字。 */
         QLabel#headline {
             font-size: 30px;
             font-weight: 700;
@@ -1683,6 +1817,7 @@ void MainWindow::applyTheme(bool nightMode)
         QLabel#muted {
             color: %6;
         }
+        /* 標籤按鈕：checked 背景由 tabBubble 呈現。 */
         QPushButton#tabButton {
             min-width: 112px;
             min-height: 40px;
@@ -1702,6 +1837,7 @@ void MainWindow::applyTheme(bool nightMode)
             background: %12;
             color: %2;
         }
+        /* 通用按鈕與各類按鈕變體。 */
         QPushButton {
             border: none;
             border-radius: 14px;
@@ -1716,10 +1852,38 @@ void MainWindow::applyTheme(bool nightMode)
         QPushButton#primaryButton:hover {
             background: rgba(141, 222, 255, 220);
         }
+        QPushButton#soundButton {
+            background: rgba(94, 203, 255, 155);
+            color: %2;
+            border: 1px solid rgba(35, 157, 214, 120);
+            min-height: 46px;
+        }
+        QPushButton#soundButton:hover {
+            background: rgba(141, 222, 255, 205);
+        }
+        QPushButton#soundButton[playing="true"] {
+            background: rgba(255, 149, 0, 190);
+            color: #ffffff;
+            border: 1px solid rgba(210, 118, 0, 150);
+        }
+        QPushButton#soundButton[playing="true"]:hover {
+            background: rgba(255, 168, 42, 220);
+        }
         QPushButton#ghostButton, QPushButton#pillButton, QPushButton#profileButton {
             background: %11;
             color: %2;
             border: 1px solid %9;
+        }
+        QPushButton#linkButton {
+            background: %11;
+            color: %2;
+            border: 1px solid %9;
+            text-align: left;
+            padding: 0 16px;
+        }
+        QPushButton#linkButton:hover {
+            background: %12;
+            border: 1px solid rgba(94, 203, 255, 190);
         }
         QPushButton#dangerButton {
             background: #ff3b30;
@@ -1754,6 +1918,7 @@ void MainWindow::applyTheme(bool nightMode)
             color: %2;
             border: 1px solid rgba(94, 203, 255, 190);
         }
+        /* 輸入控件：番茄鐘 SpinBox 與待辦輸入框。 */
         QSpinBox, QLineEdit {
             background: %7;
             color: %2;
@@ -1795,6 +1960,7 @@ void MainWindow::applyTheme(bool nightMode)
             width: 10px;
             height: 10px;
         }
+        /* 待辦列表：小窗模式隱藏捲軸，但保留滾輪操作。 */
         QListWidget {
             background: transparent;
             border: none;
@@ -1829,6 +1995,7 @@ void MainWindow::applyTheme(bool nightMode)
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
             background: transparent;
         }
+        /* 待辦事件復選框；compact=true 時代表待辦小窗樣式。 */
         QCheckBox#todoCheck {
             background: %7;
             border: 1px solid %4;
@@ -1863,6 +2030,7 @@ void MainWindow::applyTheme(bool nightMode)
             background: #34c759;
             border: 1px solid #34c759;
         }
+        /* 環境音滑桿。 */
         QSlider::groove:horizontal {
             height: 7px;
             background: %9;
@@ -1880,6 +2048,7 @@ void MainWindow::applyTheme(bool nightMode)
             background: #ffffff;
             border: 1px solid %4;
         }
+        /* 狀態概覽進度條。 */
         QProgressBar {
             background: %9;
             border: none;
@@ -1904,6 +2073,7 @@ void MainWindow::applyTheme(bool nightMode)
         .arg(glassButtonHover));
 
     for (QWidget *widget : m_shadowWidgets) {
+        // 主題切換後重新套陰影，讓夜晚模式陰影更重、白天模式更淡。
         applyShadow(widget);
     }
     moveTabBubble(m_featureStack ? m_featureStack->currentIndex() : 0, false);
@@ -1914,6 +2084,7 @@ void MainWindow::applyTheme(bool nightMode)
 
 void MainWindow::applyShadow(QWidget *widget)
 {
+    // 卡片陰影渲染：配合 m_nightMode 調整模糊半徑、位移與透明度。
     auto *effect = new QGraphicsDropShadowEffect(widget);
     effect->setBlurRadius(m_nightMode ? 18.0 : 20.0);
     effect->setOffset(0, m_nightMode ? 8 : 7);
@@ -1923,11 +2094,13 @@ void MainWindow::applyShadow(QWidget *widget)
 
 void MainWindow::installButtonAnimation(QPushButton *button)
 {
+    // 目前保留按鈕動畫入口；為了降低 CPU，預設只啟用 QSS 背景。
     button->setAttribute(Qt::WA_StyledBackground, true);
 }
 
 void MainWindow::animateButton(QPushButton *button, bool hovered, bool pressed)
 {
+    // 舊版按鈕陰影動畫，若日後想恢復所有按鈕動效可從這裡調整。
     auto *effect = qobject_cast<QGraphicsDropShadowEffect *>(button->graphicsEffect());
     if (!effect) {
         installButtonAnimation(button);
@@ -1973,6 +2146,7 @@ void MainWindow::animateButton(QPushButton *button, bool hovered, bool pressed)
 
 void MainWindow::animateButtonBubble(QPushButton *button, bool pressed)
 {
+    // 舊版按鈕氣泡動畫；目前主要保留給後續擴充。
     QWidget *bubble = button->findChild<QWidget *>("buttonBubble");
     if (!bubble) {
         return;
@@ -2021,6 +2195,7 @@ void MainWindow::animateButtonBubble(QPushButton *button, bool pressed)
 
 void MainWindow::fadeButtonBubble(QPushButton *button)
 {
+    // 舊版按鈕氣泡淡出動畫。
     QWidget *bubble = button->findChild<QWidget *>("buttonBubble");
     if (!bubble) {
         return;
@@ -2046,6 +2221,7 @@ void MainWindow::fadeButtonBubble(QPushButton *button)
 
 void MainWindow::animateEntrance()
 {
+    // 啟動淡入動畫，只改變 windowOpacity，不影響布局。
     auto *fade = new QPropertyAnimation(this, "windowOpacity", this);
     fade->setDuration(360);
     fade->setStartValue(0.0);
