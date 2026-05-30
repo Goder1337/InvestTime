@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*-beta*"
+
+permissions:
+  contents: write
+
+jobs:
+  beta-release:
+    name: Publish beta release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            --title "Beta 测试版 $TAG_NAME" \
+            --notes "Beta 测试版发布，用于早期体验与问题反馈。" \
+            --prerelease \
+            --verify-tag
