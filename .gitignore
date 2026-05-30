@@ -53,6 +53,7 @@ cmake_install.cmake
 compile_commands.json
 
 # Local environment and temporary files
+.local-ssh/
 .env
 *.tmp
 *.temp
