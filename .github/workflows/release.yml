@@ -13,13 +13,24 @@ jobs:
     name: Publish beta release
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release assets
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
       - name: Create GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG_NAME" \
-            --title "Beta 测试版 $TAG_NAME" \
-            --notes "Beta 测试版发布，用于早期体验与问题反馈。" \
+          asset="dist/InvestTime-${TAG_NAME}-win64.zip"
+          if [ ! -f "$asset" ]; then
+            echo "Missing release asset: $asset" >&2
+            exit 1
+          fi
+
+          gh release create "$TAG_NAME" "$asset#InvestTime-${TAG_NAME}-win64.zip" \
+            --title "Beta Test $TAG_NAME" \
+            --notes "Beta test release. Download the win64 zip package for the runnable app and required audio assets." \
             --prerelease \
             --verify-tag
