@@ -50,6 +50,11 @@
 #include <QAudioOutput>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDataStream>
+#include <QFile>
+#include <QIODevice>
+#include <QRandomGenerator>
 
 namespace {
 class DialogDragFilter : public QObject
@@ -94,6 +99,133 @@ private:
     bool m_dragging = false;
     QPoint m_dragOffset;
 };
+
+const QByteArray kEncryptedSettingsMagic = "SWMENC1\n";
+
+QByteArray encryptedSettingsKey()
+{
+    // 輕量加密金鑰：放在程式內可防止一般使用者直接修改 ini，但不能抵抗逆向工程。
+    return QCryptographicHash::hash("StudyWithMe::settings::v1::local-only", QCryptographicHash::Sha256);
+}
+
+QByteArray encryptedSettingsStream(const QByteArray &nonce, qsizetype size)
+{
+    QByteArray stream;
+    const QByteArray key = encryptedSettingsKey();
+    quint32 counter = 0;
+    while (stream.size() < size) {
+        QByteArray block;
+        QDataStream blockStream(&block, QIODevice::WriteOnly);
+        blockStream << key << nonce << counter++;
+        stream += QCryptographicHash::hash(block, QCryptographicHash::Sha256);
+    }
+    stream.truncate(size);
+    return stream;
+}
+
+QByteArray encryptedSettingsXor(const QByteArray &data, const QByteArray &nonce)
+{
+    QByteArray result = data;
+    const QByteArray stream = encryptedSettingsStream(nonce, data.size());
+    for (qsizetype i = 0; i < result.size(); ++i) {
+        result[i] = static_cast<char>(result.at(i) ^ stream.at(i));
+    }
+    return result;
+}
+
+QByteArray encryptedSettingsDigest(const QByteArray &nonce, const QByteArray &cipher)
+{
+    // 防篡改摘要：使用金鑰、nonce 與密文計算校驗，手改檔案會讀取失敗。
+    const QByteArray key = encryptedSettingsKey();
+    return QCryptographicHash::hash("mac:" + key + nonce + cipher + key, QCryptographicHash::Sha256);
+}
+
+bool encryptedSettingsRead(QIODevice &device, QSettings::SettingsMap &map)
+{
+    const QByteArray fileData = device.readAll();
+    if (!fileData.startsWith(kEncryptedSettingsMagic)) {
+        return false;
+    }
+
+    const QByteArray packed = QByteArray::fromBase64(fileData.mid(kEncryptedSettingsMagic.size()).trimmed());
+    if (packed.size() < 16 + 32) {
+        return false;
+    }
+
+    const QByteArray nonce = packed.left(16);
+    const QByteArray mac = packed.right(32);
+    const QByteArray cipher = packed.mid(16, packed.size() - 16 - 32);
+    if (encryptedSettingsDigest(nonce, cipher) != mac) {
+        return false;
+    }
+
+    const QByteArray plain = encryptedSettingsXor(cipher, nonce);
+    QDataStream stream(plain);
+    stream.setVersion(QDataStream::Qt_6_0);
+    stream >> map;
+    return stream.status() == QDataStream::Ok;
+}
+
+bool encryptedSettingsWrite(QIODevice &device, const QSettings::SettingsMap &map)
+{
+    QByteArray plain;
+    QDataStream stream(&plain, QIODevice::WriteOnly);
+    stream.setVersion(QDataStream::Qt_6_0);
+    stream << map;
+
+    QByteArray nonce(16, Qt::Uninitialized);
+    for (qsizetype i = 0; i < nonce.size(); ++i) {
+        nonce[i] = static_cast<char>(QRandomGenerator::global()->bounded(256));
+    }
+    const QByteArray cipher = encryptedSettingsXor(plain, nonce);
+    const QByteArray mac = encryptedSettingsDigest(nonce, cipher);
+    const QByteArray packed = nonce + cipher + mac;
+    device.write(kEncryptedSettingsMagic);
+    device.write(packed.toBase64());
+    device.write("\n");
+    return true;
+}
+
+QSettings::Format encryptedSettingsFormat()
+{
+    static const QSettings::Format format =
+        QSettings::registerFormat("swmenc", encryptedSettingsRead, encryptedSettingsWrite);
+    return format;
+}
+
+bool settingsFileIsEncrypted(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    return file.peek(kEncryptedSettingsMagic.size()) == kEncryptedSettingsMagic;
+}
+
+void migratePlainSettingsIfNeeded(const QString &path)
+{
+    QFile file(path);
+    if (!file.exists() || settingsFileIsEncrypted(path)) {
+        return;
+    }
+
+    QSettings oldSettings(path, QSettings::IniFormat);
+    const QStringList keys = oldSettings.allKeys();
+    QSettings::SettingsMap copied;
+    for (const QString &key : keys) {
+        copied.insert(key, oldSettings.value(key));
+    }
+    if (copied.isEmpty()) {
+        return;
+    }
+
+    QSettings newSettings(path, encryptedSettingsFormat());
+    newSettings.clear();
+    for (auto it = copied.cbegin(); it != copied.cend(); ++it) {
+        newSettings.setValue(it.key(), it.value());
+    }
+    newSettings.sync();
+}
 }
 
 MainWindow::MainWindow(QWidget *parent) : QWidget(parent)
@@ -582,30 +714,40 @@ void MainWindow::buildTodoCard(QVBoxLayout *pageLayout)
 
 void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
 {
-    // 環境氛圍頁：模式按鈕、音量、沉浸強度與播放控制。
-    auto *frame = createCard("环境氛围", "选择适合当前学习阶段的背景氛围，并调整音量与沉浸强度。");
+    // 環境氛圍頁：保留白噪音與雨聲兩種常用音源，介面更乾淨。
+    auto *frame = createCard("环境氛围", "在白噪音和雨声之间切换，保持稳定、低干扰的学习背景。");
     pageLayout->addWidget(frame, 1);
     auto *layout = static_cast<QVBoxLayout *>(frame->layout());
 
     auto *modes = new QHBoxLayout;
-    modes->setSpacing(12);
+    modes->setSpacing(14);
     auto *group = new QButtonGroup(this);
     group->setExclusive(true);
 
-    const QStringList ambienceItems = {"雨夜书桌", "咖啡馆", "白噪音", "森林晨光"};
+    m_ambienceButtons.clear();
+    const QStringList ambienceItems = {"白噪音", "雨声"};
     for (int i = 0; i < ambienceItems.size(); ++i) {
-        // 四個環境音模式按鈕，id 對應 ambienceUrl() 的音源列表。
+        // 兩個環境音模式按鈕，id 對應 ambienceUrl() 的音源列表。
         auto *button = createButton(ambienceItems.at(i), "ambientButton");
         button->setCheckable(true);
-        button->setMinimumHeight(58);
+        button->setMinimumHeight(74);
         if (i == 0) {
             button->setChecked(true);
         }
         group->addButton(button, i);
+        m_ambienceButtons.append(button);
         modes->addWidget(button, 1);
     }
     connect(group, qOverload<int>(&QButtonGroup::idClicked), this, &MainWindow::selectAmbience);
     layout->addLayout(modes);
+    layout->addSpacing(16);
+
+    m_currentSoundLabel = new QLabel("已选择：白噪音");
+    m_currentSoundLabel->setObjectName("soundNow");
+    m_currentSoundLabel->setMinimumHeight(38);
+    m_currentSoundLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    // 當前音源狀態：播放時顯示檔名，未播放時顯示已選模式。
+    layout->addWidget(m_currentSoundLabel);
     layout->addSpacing(22);
 
     auto *volumeLabel = new QLabel("氛围音量");
@@ -620,25 +762,32 @@ void MainWindow::buildAmbienceCard(QVBoxLayout *pageLayout)
         }
     });
 
-    auto *depthLabel = new QLabel("沉浸强度");
-    depthLabel->setObjectName("muted");
-    auto *depth = new QSlider(Qt::Horizontal);
-    // 沉浸強度目前是展示控件，保留給後續視覺/音效強度擴充。
-    depth->setRange(0, 100);
-    depth->setValue(72);
-
     layout->addWidget(volumeLabel);
     layout->addWidget(volume);
-    layout->addSpacing(18);
-    layout->addWidget(depthLabel);
-    layout->addWidget(depth);
+    layout->addSpacing(24);
+
+    auto *trackRow = new QHBoxLayout;
+    trackRow->setContentsMargins(0, 0, 0, 0);
+    trackRow->setSpacing(12);
+    m_prevSoundButton = createButton("上一首", "trackButton");
+    m_nextSoundButton = createButton("下一首", "trackButton");
+    m_prevSoundButton->setMinimumHeight(46);
+    m_nextSoundButton->setMinimumHeight(46);
+    m_prevSoundButton->setMinimumWidth(104);
+    m_nextSoundButton->setMinimumWidth(104);
     m_playSoundButton = createButton("播放环境音", "soundButton");
     m_playSoundButton->setProperty("playing", false);
     m_playSoundButton->setMinimumHeight(46);
-    // 播放/暫停環境音，音源優先使用本地 assets，否則 fallback 到網路音源。
+    // 曲目控制列：上一首/播放暫停/下一首都針對目前選中的環境音資料夾。
     layout->addSpacing(18);
-    layout->addWidget(m_playSoundButton);
+    trackRow->addWidget(m_prevSoundButton);
+    trackRow->addWidget(m_playSoundButton, 1);
+    trackRow->addWidget(m_nextSoundButton);
+    layout->addLayout(trackRow);
+    // 播放/暫停環境音，音源優先使用本地 assets，否則 fallback 到網路音源。
+    connect(m_prevSoundButton, &QPushButton::clicked, this, [this]() { changeAmbienceTrack(-1); });
     connect(m_playSoundButton, &QPushButton::clicked, this, &MainWindow::toggleAmbiencePlayback);
+    connect(m_nextSoundButton, &QPushButton::clicked, this, [this]() { changeAmbienceTrack(1); });
     layout->addStretch();
 }
 
@@ -723,7 +872,7 @@ void MainWindow::buildOverviewCard(QVBoxLayout *pageLayout)
         m_dailyStudySeconds.clear();
         m_unsavedStudySeconds = 0;
 
-        QSettings settings(settingsPath(), QSettings::IniFormat);
+        QSettings settings(settingsPath(), encryptedSettingsFormat());
         settings.remove("studyDays");
         settings.sync();
 
@@ -1295,6 +1444,7 @@ void MainWindow::setupPersistence()
     // 建立 ini 檔所在資料夾，所有狀態都寫入 settingsPath()。
     const QFileInfo info(settingsPath());
     QDir().mkpath(info.absolutePath());
+    migratePlainSettingsIfNeeded(settingsPath());
 }
 
 QString MainWindow::settingsPath() const
@@ -1310,7 +1460,7 @@ QString MainWindow::settingsPath() const
 void MainWindow::loadState()
 {
     // 啟動時讀取 UI、番茄鐘、學習目標、音訊與待辦狀態。
-    QSettings settings(settingsPath(), QSettings::IniFormat);
+    QSettings settings(settingsPath(), encryptedSettingsFormat());
 
     m_nightMode = settings.value("ui/nightMode", false).toBool();
     applyTheme(m_nightMode);
@@ -1348,6 +1498,7 @@ void MainWindow::loadState()
     settings.endGroup();
 
     m_ambienceIndex = settings.value("audio/ambienceIndex", 0).toInt();
+    m_ambienceTrackIndex = settings.value("audio/trackIndex", 0).toInt();
     if (m_audioOutput) {
         m_audioOutput->setVolume(settings.value("audio/volume", 0.64).toDouble());
     }
@@ -1366,7 +1517,7 @@ void MainWindow::saveState()
     flushStudyStats();
     saveTodos();
 
-    QSettings settings(settingsPath(), QSettings::IniFormat);
+    QSettings settings(settingsPath(), encryptedSettingsFormat());
     settings.setValue("ui/nightMode", m_nightMode);
     settings.setValue("ui/alwaysOnTop", m_alwaysOnTop);
     settings.setValue("ui/todoCompact", m_todoCompact);
@@ -1383,6 +1534,7 @@ void MainWindow::saveState()
     settings.setValue("goals/weeklySeconds", m_weeklyGoalSeconds);
     settings.setValue("goals/monthlySeconds", m_monthlyGoalSeconds);
     settings.setValue("audio/ambienceIndex", m_ambienceIndex);
+    settings.setValue("audio/trackIndex", m_ambienceTrackIndex);
     if (m_audioOutput) {
         settings.setValue("audio/volume", m_audioOutput->volume());
     }
@@ -1392,7 +1544,7 @@ void MainWindow::saveState()
 void MainWindow::loadTodos()
 {
     // 從 ini 的 todos/items 陣列讀回待辦文字與勾選狀態。
-    QSettings settings(settingsPath(), QSettings::IniFormat);
+    QSettings settings(settingsPath(), encryptedSettingsFormat());
     if (!settings.value("todos/saved", false).toBool() || !m_todoList) {
         return;
     }
@@ -1413,7 +1565,7 @@ void MainWindow::saveTodos()
         return;
     }
 
-    QSettings settings(settingsPath(), QSettings::IniFormat);
+    QSettings settings(settingsPath(), encryptedSettingsFormat());
     settings.setValue("todos/saved", true);
     settings.beginWriteArray("todos/items");
     for (int i = 0; i < m_todoList->count(); ++i) {
@@ -1448,7 +1600,7 @@ void MainWindow::flushStudyStats()
         return;
     }
 
-    QSettings settings(settingsPath(), QSettings::IniFormat);
+    QSettings settings(settingsPath(), encryptedSettingsFormat());
     settings.beginGroup("studyDays");
     for (auto it = m_dailyStudySeconds.cbegin(); it != m_dailyStudySeconds.cend(); ++it) {
         settings.setValue(it.key().toString(Qt::ISODate), it.value());
@@ -1598,7 +1750,15 @@ void MainWindow::setupAudio()
 void MainWindow::selectAmbience(int index)
 {
     // 切換環境音，若原本正在播放則換源後繼續播放。
-    m_ambienceIndex = qBound(0, index, 3);
+    const int safeIndex = qBound(0, index, 1);
+    if (safeIndex != m_ambienceIndex) {
+        m_ambienceTrackIndex = 0;
+    }
+    m_ambienceIndex = safeIndex;
+    for (int i = 0; i < m_ambienceButtons.size(); ++i) {
+        // 從設定檔恢復音源時，也同步更新兩個來源按鈕的選中狀態。
+        m_ambienceButtons.at(i)->setChecked(i == m_ambienceIndex);
+    }
     if (!m_audioPlayer) {
         return;
     }
@@ -1610,6 +1770,7 @@ void MainWindow::selectAmbience(int index)
     } else {
         updateAmbienceButton(false);
     }
+    updateAmbienceNowLabel(wasPlaying);
 }
 
 void MainWindow::toggleAmbiencePlayback()
@@ -1631,6 +1792,25 @@ void MainWindow::toggleAmbiencePlayback()
     }
 }
 
+void MainWindow::changeAmbienceTrack(int direction)
+{
+    // 上一首/下一首只在目前分類資料夾內循環，不跨白噪音與雨聲。
+    const QFileInfoList files = ambienceFiles(m_ambienceIndex);
+    if (!files.isEmpty()) {
+        const int count = files.size();
+        m_ambienceTrackIndex = (m_ambienceTrackIndex + direction + count) % count;
+    }
+
+    const bool wasPlaying = m_playSoundButton && m_playSoundButton->property("playing").toBool();
+    if (m_audioPlayer) {
+        m_audioPlayer->setSource(ambienceUrl(m_ambienceIndex));
+        if (wasPlaying) {
+            m_audioPlayer->play();
+        }
+    }
+    updateAmbienceButton(wasPlaying);
+}
+
 void MainWindow::updateAmbienceButton(bool playing)
 {
     // 只由此函式更新環境音按鈕文字與動態屬性，避免再次點擊時文字、顏色不同步。
@@ -1642,30 +1822,80 @@ void MainWindow::updateAmbienceButton(bool playing)
     m_playSoundButton->style()->unpolish(m_playSoundButton);
     m_playSoundButton->style()->polish(m_playSoundButton);
     m_playSoundButton->update();
+    updateAmbienceNowLabel(playing);
+}
+
+void MainWindow::updateAmbienceNowLabel(bool playing)
+{
+    // 環境音狀態文字：本地音檔顯示檔名，網路 fallback 顯示來源類型。
+    if (!m_currentSoundLabel) {
+        return;
+    }
+
+    QString sourceName = ambienceName(m_ambienceIndex);
+    if (m_audioPlayer) {
+        const QUrl source = m_audioPlayer->source();
+        if (source.isLocalFile()) {
+            sourceName = QFileInfo(source.toLocalFile()).fileName();
+        } else if (!source.isEmpty()) {
+            sourceName = ambienceName(m_ambienceIndex) + "（网络音源）";
+        }
+    }
+
+    m_currentSoundLabel->setText(playing ? QString("正在播放：%1").arg(sourceName)
+                                         : QString("已选择：%1").arg(sourceName));
+}
+
+QFileInfoList MainWindow::ambienceFiles(int index) const
+{
+    // 掃描專屬資料夾：white_noise 放白噪音，rain 放雨聲。
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList folderNames = {
+        "white_noise",
+        "rain"
+    };
+    const QStringList audioFilters = {
+        "*.ogg", "*.wav", "*.mp3", "*.flac", "*.m4a", "*.aac"
+    };
+    const QStringList audioRoots = {
+        appDir + "/assets/audio",
+        QDir(appDir).absoluteFilePath("../../../StudyWithMe/assets/audio")
+    };
+
+    const int safeIndex = qBound(0, index, folderNames.size() - 1);
+    for (const QString &root : audioRoots) {
+        QDir audioDir(root + "/" + folderNames.at(safeIndex));
+        const QFileInfoList files = audioDir.entryInfoList(audioFilters, QDir::Files, QDir::Name);
+        if (!files.isEmpty()) {
+            return files;
+        }
+    }
+    return {};
 }
 
 QUrl MainWindow::ambienceUrl(int index) const
 {
-    // 優先使用部署目錄 assets/audio 下的本地音檔。
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QStringList localFiles = {
-        appDir + "/assets/audio/rain.ogg",
-        appDir + "/assets/audio/cafe.wav",
-        appDir + "/assets/audio/white_noise.ogg",
-        appDir + "/assets/audio/forest.ogg"
-    };
-    if (index >= 0 && index < localFiles.size() && QFileInfo::exists(localFiles.at(index))) {
-        return QUrl::fromLocalFile(localFiles.at(index));
+    // 依照目前曲目索引取本地音檔；資料夾沒有音檔時才使用網路 fallback。
+    const QFileInfoList files = ambienceFiles(index);
+    if (!files.isEmpty()) {
+        const int safeTrackIndex = ((m_ambienceTrackIndex % files.size()) + files.size()) % files.size();
+        return QUrl::fromLocalFile(files.at(safeTrackIndex).absoluteFilePath());
     }
 
     const QStringList remoteUrls = {
-        // 本地檔不存在時使用網路 fallback，方便專案先能播放。
-        "https://commons.wikimedia.org/wiki/Special:Redirect/file/Rain%20and%20thunder.ogg",
-        "https://commons.wikimedia.org/wiki/Special:Redirect/file/Restaurant%20ambience%2C%20early%20morning%2C%20A.wav",
+        // 本地資料夾尚未放音檔時使用網路 fallback，方便專案先能播放。
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/White%20noise.ogg",
-        "https://commons.wikimedia.org/wiki/Special:Redirect/file/Blackbird%20song.ogg"
+        "https://commons.wikimedia.org/wiki/Special:Redirect/file/Rain%20and%20thunder.ogg"
     };
-    return QUrl(remoteUrls.value(index, remoteUrls.first()));
+    const int safeIndex = qBound(0, index, remoteUrls.size() - 1);
+    return QUrl(remoteUrls.value(safeIndex, remoteUrls.first()));
+}
+
+QString MainWindow::ambienceName(int index) const
+{
+    // 與環境音按鈕及 ambienceUrl() 的索引保持一致。
+    const QStringList names = {"白噪音", "雨声"};
+    return names.value(qBound(0, index, names.size() - 1), names.first());
 }
 
 void MainWindow::applyTheme(bool nightMode)
@@ -1869,7 +2099,16 @@ void MainWindow::applyTheme(bool nightMode)
         QPushButton#soundButton[playing="true"]:hover {
             background: rgba(255, 168, 42, 220);
         }
-        QPushButton#ghostButton, QPushButton#pillButton, QPushButton#profileButton {
+        QLabel#soundNow {
+            background: %11;
+            color: %6;
+            border: 1px solid %9;
+            border-radius: 13px;
+            padding: 0 14px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#ghostButton, QPushButton#pillButton, QPushButton#profileButton, QPushButton#trackButton {
             background: %11;
             color: %2;
             border: 1px solid %9;
@@ -1910,13 +2149,20 @@ void MainWindow::applyTheme(bool nightMode)
             background: %11;
             color: %2;
             border: 1px solid %9;
+            border-radius: 16px;
+            font-size: 16px;
+            font-weight: 700;
             text-align: center;
-            padding: 0 16px;
+            padding: 0 18px;
+        }
+        QPushButton#ambientButton:hover {
+            background: %12;
+            border: 1px solid rgba(94, 203, 255, 150);
         }
         QPushButton#ambientButton:checked {
-            background: %12;
+            background: rgba(94, 203, 255, 138);
             color: %2;
-            border: 1px solid rgba(94, 203, 255, 190);
+            border: 1px solid rgba(35, 157, 214, 190);
         }
         /* 輸入控件：番茄鐘 SpinBox 與待辦輸入框。 */
         QSpinBox, QLineEdit {

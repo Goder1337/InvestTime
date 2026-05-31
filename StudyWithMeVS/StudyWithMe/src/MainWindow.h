@@ -3,6 +3,8 @@
 #include <QList>
 #include <QMap>
 #include <QDate>
+#include <QDir>
+#include <QFileInfo>
 #include <QPoint>
 #include <QRect>
 #include <QString>
@@ -99,8 +101,12 @@ private:
     void setupAudio();
     void selectAmbience(int index);
     void toggleAmbiencePlayback();
+    void changeAmbienceTrack(int direction);
     void updateAmbienceButton(bool playing);
+    void updateAmbienceNowLabel(bool playing);
+    QFileInfoList ambienceFiles(int index) const;
     QUrl ambienceUrl(int index) const;
+    QString ambienceName(int index) const;
     QString formatTime(int seconds) const;
 
     QTimer m_timer;                              // 番茄鐘每秒觸發一次 tick()。
@@ -133,6 +139,10 @@ private:
     QPushButton *m_dayButton = nullptr;          // 白天主題按鈕。
     QPushButton *m_nightButton = nullptr;        // 夜晚主題按鈕。
     QPushButton *m_playSoundButton = nullptr;    // 環境音播放/暫停按鈕。
+    QPushButton *m_prevSoundButton = nullptr;    // 環境音上一首按鈕。
+    QPushButton *m_nextSoundButton = nullptr;    // 環境音下一首按鈕。
+    QList<QPushButton *> m_ambienceButtons;      // 環境音來源按鈕，索引用於同步音源與選中樣式。
+    QLabel *m_currentSoundLabel = nullptr;       // 顯示目前選擇或正在播放的環境音。
     QPushButton *m_goalButton = nullptr;         // 學習目標設定按鈕。
     QLineEdit *m_todoInput = nullptr;            // 待辦輸入框。
     QWidget *m_todoInputRowWidget = nullptr;     // 待辦輸入列，小窗模式隱藏。
@@ -161,6 +171,7 @@ private:
     QMap<QDate, int> m_dailyStudySeconds;        // 每日學習秒數，寫入 ini 的 studyDays。
     int m_unsavedStudySeconds = 0;               // 尚未落盤的學習秒數。
     int m_ambienceIndex = 0;                     // 當前環境音索引。
+    int m_ambienceTrackIndex = 0;                // 當前環境音資料夾中的曲目索引。
     int m_dailyGoalSeconds = 120 * 60;           // 每日目標，預設 120 分鐘。
     int m_weeklyGoalSeconds = 720 * 60;          // 每週目標，預設 720 分鐘。
     int m_monthlyGoalSeconds = 21 * 60 * 60;     // 每月目標，預設 21 小時。
